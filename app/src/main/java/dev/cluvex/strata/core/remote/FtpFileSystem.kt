@@ -59,7 +59,8 @@ class FtpFileSystem(private val connection: RemoteConnection) : RemoteFileSystem
         client.setFileType(FTP.BINARY_FILE_TYPE)
         // MT-like throughput: 1 MB copy buffer + 4 MB TCP windows instead of the 8 KB default.
         client.bufferSize = 1024 * 1024
-        client.setReceiveDataSocketBufferSize(4 * 1024 * 1024)
+        // NB: commons-net spells the setter "Receieve" (upstream typo); the getter is spelled correctly.
+        client.setReceieveDataSocketBufferSize(4 * 1024 * 1024)
         client.setSendDataSocketBufferSize(4 * 1024 * 1024)
         client.soTimeout = 60_000
         @Suppress("DEPRECATION")

@@ -167,7 +167,7 @@ object VaultTransfers {
         return when (conflict) {
             Conflict.SKIP -> null
             Conflict.OVERWRITE -> RemotePaths.join(dir, name)
-            Conflict.KEEP_BOTH -> RemotePaths.join(dir, FsUtil.uniqueName(name, isDirectory) { it in taken })
+            Conflict.KEEP_BOTH, Conflict.ASK -> RemotePaths.join(dir, FsUtil.uniqueName(name, isDirectory) { it in taken })
         }
     }
 
@@ -176,7 +176,7 @@ object VaultTransfers {
         return when (conflict) {
             Conflict.SKIP -> null
             Conflict.OVERWRITE -> wanted.takeIf { it.isFile }?.also { it.delete() } ?: FsUtil.uniqueSibling(wanted, false)
-            Conflict.KEEP_BOTH -> FsUtil.uniqueSibling(wanted, false)
+            Conflict.KEEP_BOTH, Conflict.ASK -> FsUtil.uniqueSibling(wanted, false)
         }
     }
 

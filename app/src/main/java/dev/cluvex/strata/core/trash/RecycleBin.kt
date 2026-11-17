@@ -116,7 +116,7 @@ class RecycleBin(
                         skipped += entry.name
                         continue
                     }
-                    Conflict.KEEP_BOTH -> target = FsUtil.uniqueSibling(target, entry.info.isDirectory)
+                    Conflict.KEEP_BOTH, Conflict.ASK -> target = FsUtil.uniqueSibling(target, entry.info.isDirectory)
                     Conflict.OVERWRITE -> if (!FsUtil.deleteRecursively(target)) {
                         failed += tr(R.string.files_cannot_replace, entry.name)
                         continue
