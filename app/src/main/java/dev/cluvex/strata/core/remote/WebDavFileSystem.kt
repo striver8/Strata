@@ -149,7 +149,7 @@ class WebDavFileSystem(private val c: RemoteConnection) : RemoteFileSystem {
 
     override fun download(path: String, into: OutputStream, onBytes: (Long) -> Unit) {
         openInput(path).use { input ->
-            val buf = ByteArray(64 * 1024)
+            val buf = ByteArray(1024 * 1024)
             var total = 0L
             while (true) {
                 val n = input.read(buf)
@@ -166,7 +166,7 @@ class WebDavFileSystem(private val c: RemoteConnection) : RemoteFileSystem {
             override fun contentType() = OCTET
             override fun isOneShot() = true
             override fun writeTo(sink: BufferedSink) {
-                val buf = ByteArray(64 * 1024)
+                val buf = ByteArray(1024 * 1024)
                 var total = 0L
                 while (true) {
                     val n = from.read(buf)

@@ -156,7 +156,7 @@ class SftpFileSystem(private val connection: RemoteConnection) : RemoteFileSyste
     private fun client(): SFTPClient = sftp ?: error(tr(R.string.remote_not_connected))
 
     private fun copy(input: InputStream, output: OutputStream, onBytes: (Long) -> Unit) {
-        val buf = ByteArray(1 shl 16)
+        val buf = ByteArray(1 shl 18)
         var total = 0L
         while (true) {
             val n = input.read(buf)

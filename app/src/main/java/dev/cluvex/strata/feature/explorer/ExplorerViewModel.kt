@@ -39,6 +39,10 @@ import dev.cluvex.strata.core.fs.DropRules
 import dev.cluvex.strata.core.fs.DropVerdict
 import dev.cluvex.strata.core.fs.TopLevel
 import dev.cluvex.strata.core.fs.Conflict
+import dev.cluvex.strata.core.fs.ConflictDecision
+import dev.cluvex.strata.core.fs.ConflictInfo
+import dev.cluvex.strata.core.fs.ConflictResolver
+import dev.cluvex.strata.core.fs.identicalFile
 import dev.cluvex.strata.core.fs.DirectoryLister
 import dev.cluvex.strata.core.dex.DexConvert
 import dev.cluvex.strata.core.fs.FileAccess
@@ -211,18 +215,49 @@ class ExplorerViewModel(
 
     private val keepTime: Boolean get() = _state.value.settings.operations.keepModifiedTime
 
-    private suspend fun conflictsIn(dst: PaneState, names: List<String>): List<String> = conflictsAt(dst.path, dst.viaRoot, names)
+    private var conflictDeferred: kotlinx.coroutines.CompletableDeferred<ConflictDecision>? = null
 
-    private suspend fun conflictsAt(path: String, viaRoot: Boolean, names: List<String>): List<String> = withContext(Dispatchers.IO) {
+    /** MT-style per-file prompt: suspends the transfer until the user picks skip/replace/keep-both. */
+    private val conflictResolver = ConflictResolver { info ->
+        val deferred = kotlinx.coroutines.CompletableDeferred<ConflictDecision>()
+        conflictDeferred = deferred
+        _state.update { it.copy(fileConflict = info) }
+        try {
+            deferred.await()
+        } finally {
+            conflictDeferred = null
+            _state.update { it.copy(fileConflict = null) }
+        }
+    }
+
+    fun resolveFileConflict(conflict: Conflict, applyToAll: Boolean) {
+        conflictDeferred?.complete(ConflictDecision(conflict, applyToAll))
+    }
+
+    fun dismissFileConflict() {
+        conflictDeferred?.complete(ConflictDecision(Conflict.SKIP, applyToAll = false))
+    }
+
+    private suspend fun conflictsIn(dst: PaneState, items: List<FileItem>): List<String> = conflictsAt(dst.path, dst.viaRoot, items)
+
+    /** Names that truly conflict; identical files (same size + mtime) are excluded because they auto-skip. */
+    private suspend fun conflictsAt(path: String, viaRoot: Boolean, items: List<FileItem>): List<String> = withContext(Dispatchers.IO) {
         if (RemoteUri.isRemote(path)) {
-            val taken = runCatching {
-                sessions.use(RemoteUri.id(path)) { fs -> fs.list(RemoteUri.path(path)).mapTo(HashSet()) { it.name } }
-            }.getOrDefault(emptySet())
-            return@withContext names.filter { it in taken }
+            val entries = runCatching {
+                sessions.use(RemoteUri.id(path)) { fs -> fs.list(RemoteUri.path(path)) }
+            }.getOrDefault(emptyList())
+            return@withContext items.filter { item ->
+                val e = entries.firstOrNull { it.name == item.name } ?: return@filter false
+                !(!item.isDirectory && !e.isDirectory && identicalFile(item.size, item.lastModified, e.size, e.modified))
+            }.map { it.name }
         }
         val to = runCatching { access(path, write = true, viaRoot = viaRoot) }.getOrNull() ?: return@withContext emptyList<String>()
         val destFile = to.file(path)
-        names.filter { FsUtil.exists(to.child(destFile, it), to) }
+        items.filter { item ->
+            val f = to.child(destFile, item.name)
+            if (!FsUtil.exists(f, to)) return@filter false
+            !(!item.isDirectory && !f.isDirectory && identicalFile(item.size, item.lastModified, f.length(), f.lastModified()))
+        }.map { it.name }
     }
 
     fun setActive(pane: Pane) {
@@ -513,7 +548,7 @@ class ExplorerViewModel(
         val policy = conflictPolicy()
         if (policy != null || dst.path == clip.sourceDir) return pasteWith(pane, policy ?: Conflict.KEEP_BOTH)
         viewModelScope.launch {
-            val conflicts = conflictsIn(dst, clip.items.map { it.name })
+            val conflicts = conflictsIn(dst, clip.items)
             if (conflicts.isEmpty()) {
                 pasteWith(pane, Conflict.KEEP_BOTH)
             } else {
@@ -529,7 +564,7 @@ class ExplorerViewModel(
         val title = tr(if (clip.move) R.string.explorer_task_moving else R.string.explorer_task_copying)
         if (RemoteUri.isRemote(clip.sourceDir) || RemoteUri.isRemote(dst.path)) {
             runTask(title, {
-                RemoteTransfers.transfer(clip.items, Place.of(dst.path), clip.move, conflict, sessions, transferTemp())
+                RemoteTransfers.transfer(clip.items, Place.of(dst.path), clip.move, conflict, sessions, transferTemp(), resolver = conflictResolver)
             }, sound = UiSound.LAND) { done ->
                 _state.update { it.copy(clipboard = null) }
                 refreshAllRevealing(dst.path, done.created)
@@ -540,9 +575,9 @@ class ExplorerViewModel(
             val from = access(clip.sourceDir, write = clip.move, viaRoot = clip.viaRoot)
             val to = access(dst.path, write = true, viaRoot = dst.viaRoot)
             if (clip.move) {
-                FileOperations.move(clip.items, dst.path, conflict, from = from, to = to)
+                FileOperations.move(clip.items, dst.path, conflict, from = from, to = to, resolver = conflictResolver)
             } else {
-                FileOperations.copy(clip.items, dst.path, conflict, from = from, to = to, keepTime = keepTime)
+                FileOperations.copy(clip.items, dst.path, conflict, from = from, to = to, keepTime = keepTime, resolver = conflictResolver)
             }
         }, sound = UiSound.LAND) { done ->
             _state.update { it.copy(clipboard = null) }
@@ -557,7 +592,7 @@ class ExplorerViewModel(
         val dst = s.pane(s.active.other)
         conflictPolicy()?.let { return transferToOther(move, it) }
         viewModelScope.launch {
-            val conflicts = conflictsIn(dst, items.map { it.name })
+            val conflicts = conflictsIn(dst, items)
             if (conflicts.isEmpty()) {
                 transferToOther(move, Conflict.KEEP_BOTH)
             } else {
@@ -583,7 +618,7 @@ class ExplorerViewModel(
         conflictPolicy()?.let { return moveDropped(fromPane, items, destination, it) }
         viewModelScope.launch {
             val viaRoot = viaRootFor(destination) || _state.value.pane(fromPane).viaRoot
-            val conflicts = conflictsAt(destination, viaRoot, items.map { it.name })
+            val conflicts = conflictsAt(destination, viaRoot, items)
             if (conflicts.isEmpty()) {
                 moveDropped(fromPane, items, destination, Conflict.KEEP_BOTH)
             } else {
@@ -600,7 +635,7 @@ class ExplorerViewModel(
         val sourceDir = items.first().parentPath ?: src.path
         if (RemoteUri.isRemote(sourceDir) || RemoteUri.isRemote(destination)) {
             runTask(tr(R.string.explorer_task_moving), {
-                RemoteTransfers.transfer(items, Place.of(destination), true, conflict, sessions, transferTemp())
+                RemoteTransfers.transfer(items, Place.of(destination), true, conflict, sessions, transferTemp(), resolver = conflictResolver)
             }, sound = UiSound.LAND) { done ->
                 clearSelection(fromPane)
                 refreshAllRevealing(destination, done.created)
@@ -610,7 +645,7 @@ class ExplorerViewModel(
         runTask(tr(R.string.explorer_task_moving), {
             val from = access(sourceDir, write = true, viaRoot = src.viaRoot)
             val to = access(destination, write = true, viaRoot = viaRootFor(destination) || src.viaRoot)
-            FileOperations.move(items, destination, conflict, from, to)
+            FileOperations.move(items, destination, conflict, from, to, resolver = conflictResolver)
         }, sound = UiSound.LAND) { done ->
             clearSelection(fromPane)
             refreshAllRevealing(destination, done.created)
@@ -651,7 +686,7 @@ class ExplorerViewModel(
         val title = tr(if (move) R.string.explorer_task_moving else R.string.explorer_task_copying)
         if (RemoteUri.isRemote(src.path) || RemoteUri.isRemote(dst.path)) {
             runTask(title, {
-                RemoteTransfers.transfer(items, Place.of(dst.path), move, conflict, sessions, transferTemp())
+                RemoteTransfers.transfer(items, Place.of(dst.path), move, conflict, sessions, transferTemp(), resolver = conflictResolver)
             }, sound = UiSound.LAND) { done ->
                 clearSelection(fromPane)
                 refreshAllRevealing(dst.path, done.created)
@@ -662,9 +697,9 @@ class ExplorerViewModel(
             val from = access(src.path, write = move, viaRoot = src.viaRoot)
             val to = access(dst.path, write = true, viaRoot = dst.viaRoot)
             if (move) {
-                FileOperations.move(items, dst.path, conflict, from, to)
+                FileOperations.move(items, dst.path, conflict, from, to, resolver = conflictResolver)
             } else {
-                FileOperations.copy(items, dst.path, conflict, from, to, keepTime)
+                FileOperations.copy(items, dst.path, conflict, from, to, keepTime, resolver = conflictResolver)
             }
         }, sound = UiSound.LAND) { done ->
             clearSelection(fromPane)

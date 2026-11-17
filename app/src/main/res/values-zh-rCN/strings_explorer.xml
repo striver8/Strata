@@ -222,6 +222,14 @@
     <string name="explorer_conflict_question">要如何处理？</string>
     <string name="explorer_conflict_keep_both">保留两者（重命名新项）</string>
     <string name="explorer_conflict_replace">替换（文件夹将合并）</string>
+    <string name="explorer_conflict_ask_each">逐个询问每个文件</string>
+    <string name="explorer_conflict_identical_note">大小和修改时间相同的文件会自动跳过。</string>
+    <string name="file_conflict_title">文件已存在</string>
+    <string name="file_conflict_source">来源：%1$s · %2$s</string>
+    <string name="file_conflict_destination">已有：%1$s · %2$s</string>
+    <string name="file_conflict_apply_all">应用到剩余所有冲突</string>
+    <string name="file_conflict_keep_both">保留两者</string>
+    <string name="file_conflict_overwrite">覆盖</string>
     <string name="explorer_checksums">校验值</string>
     <string name="explorer_computing">正在计算…</string>
     <string name="explorer_checksum_native">原生库</string>

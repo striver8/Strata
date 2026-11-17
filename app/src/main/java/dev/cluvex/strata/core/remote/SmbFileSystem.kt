@@ -211,7 +211,7 @@ class SmbFileSystem(private val c: RemoteConnection) : RemoteFileSystem {
     }
 
     private fun copy(input: InputStream, out: OutputStream, onBytes: (Long) -> Unit) {
-        val buf = ByteArray(64 * 1024)
+        val buf = ByteArray(1024 * 1024)
         var total = 0L
         while (true) {
             val n = input.read(buf)

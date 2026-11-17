@@ -104,6 +104,7 @@ import dev.cluvex.strata.feature.explorer.components.PasswordDialog
 import dev.cluvex.strata.feature.explorer.components.SortSheet
 import dev.cluvex.strata.feature.explorer.components.SplitDialog
 import dev.cluvex.strata.feature.explorer.components.TaskOverlay
+import dev.cluvex.strata.feature.explorer.components.FileConflictDialog
 import dev.cluvex.strata.feature.explorer.components.TransferDialog
 import dev.cluvex.strata.feature.props.PropertiesSheet
 import dev.cluvex.strata.feature.remote.HostKeyChangedDialog
@@ -651,6 +652,14 @@ fun ExplorerScreen(
             conflicts = prompt.conflicts,
             onConfirm = { conflict -> vm.confirmTransfer(conflict) },
             onDismiss = { vm.cancelTransfer() },
+        )
+    }
+
+    ui.fileConflict?.let { info ->
+        FileConflictDialog(
+            info = info,
+            onDecision = { conflict, applyAll -> vm.resolveFileConflict(conflict, applyAll) },
+            onDismiss = { vm.dismissFileConflict() },
         )
     }
 

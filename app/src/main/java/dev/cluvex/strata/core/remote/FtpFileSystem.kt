@@ -57,6 +57,13 @@ class FtpFileSystem(private val connection: RemoteConnection) : RemoteFileSystem
         }
         client.enterLocalPassiveMode()
         client.setFileType(FTP.BINARY_FILE_TYPE)
+        // MT-like throughput: 1 MB copy buffer + 4 MB TCP windows instead of the 8 KB default.
+        client.bufferSize = 1024 * 1024
+        client.setReceiveDataSocketBufferSize(4 * 1024 * 1024)
+        client.setSendDataSocketBufferSize(4 * 1024 * 1024)
+        client.soTimeout = 60_000
+        @Suppress("DEPRECATION")
+        client.setControlKeepAliveTimeout(30)
     }
 
     override fun list(path: String): List<RemoteEntry> {
@@ -82,7 +89,7 @@ class FtpFileSystem(private val connection: RemoteConnection) : RemoteFileSystem
         val p = RemotePaths.normalize(path)
         val stream = client.retrieveFileStream(p)
             ?: throw IOException(tr(R.string.remote_open_failed_reply, p, client.replyString?.trim()))
-        return object : FilterInputStream(stream) {
+        return object : FilterInputStream(java.io.BufferedInputStream(stream, 256 * 1024)) {
             private var completed = false
             override fun close() {
                 super.close()
@@ -95,7 +102,7 @@ class FtpFileSystem(private val connection: RemoteConnection) : RemoteFileSystem
     }
 
     override fun download(path: String, into: OutputStream, onBytes: (Long) -> Unit) {
-        val counting = object : FilterOutputStream(into) {
+        val counting = object : FilterOutputStream(java.io.BufferedOutputStream(into, 1024 * 1024)) {
             var count = 0L
             override fun write(b: Int) { super.write(b); onBytes(++count) }
             override fun write(b: ByteArray, off: Int, len: Int) {
@@ -108,7 +115,7 @@ class FtpFileSystem(private val connection: RemoteConnection) : RemoteFileSystem
     }
 
     override fun upload(from: InputStream, path: String, onBytes: (Long) -> Unit) {
-        val counting = object : FilterInputStream(from) {
+        val counting = object : FilterInputStream(java.io.BufferedInputStream(from, 256 * 1024)) {
             var count = 0L
             override fun read(): Int = super.read().also { if (it >= 0) onBytes(++count) }
             override fun read(b: ByteArray, off: Int, len: Int): Int =

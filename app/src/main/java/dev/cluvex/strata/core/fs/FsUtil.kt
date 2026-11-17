@@ -121,7 +121,7 @@ object FsUtil {
         }
         dst.parentFile?.let { if (!it.isDirectory) it.mkdirs() }
         from.openInput(src).use { input ->
-            to.openOutput(dst).use { output -> input.copyTo(output, 64 * 1024) }
+            to.openOutput(dst).use { output -> input.copyTo(output, 1024 * 1024) }
         }
         if (keepTime) dst.setLastModified(src.lastModified())
         return true

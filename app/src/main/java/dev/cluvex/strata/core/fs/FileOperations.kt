@@ -31,7 +31,27 @@ sealed interface OpProgress {
     ) : OpProgress
 }
 
-enum class Conflict { OVERWRITE, SKIP, KEEP_BOTH }
+enum class Conflict { OVERWRITE, SKIP, KEEP_BOTH, ASK }
+
+/** Details shown when a destination entry already exists (MT-style per-file prompt). */
+data class ConflictInfo(
+    val name: String,
+    val isDirectory: Boolean,
+    val srcSize: Long,
+    val srcModified: Long,
+    val dstSize: Long,
+    val dstModified: Long,
+)
+
+data class ConflictDecision(val conflict: Conflict, val applyToAll: Boolean = false)
+
+fun interface ConflictResolver {
+    suspend fun resolve(info: ConflictInfo): ConflictDecision
+}
+
+/** Same size and modification time (±2s for filesystem timestamp granularity) = identical file. */
+fun identicalFile(srcSize: Long, srcModified: Long, dstSize: Long, dstModified: Long): Boolean =
+    srcSize >= 0 && srcSize == dstSize && kotlin.math.abs(srcModified - dstModified) <= 2_000
 
 data class LinkRequest(val name: String, val target: String)
 
@@ -103,7 +123,9 @@ object FileOperations {
         from: FileAccess = LocalFileAccess,
         to: FileAccess = from,
         keepTime: Boolean = true,
-    ): Flow<OpProgress> = transfer(items, destDir, move = false, conflict, from, to, keepTime)
+        resolver: ConflictResolver? = null,
+        skipIdentical: Boolean = true,
+    ): Flow<OpProgress> = transfer(items, destDir, move = false, conflict, from, to, keepTime, resolver, skipIdentical)
 
     fun move(
         items: List<FileItem>,
@@ -111,7 +133,9 @@ object FileOperations {
         conflict: Conflict = Conflict.OVERWRITE,
         from: FileAccess = LocalFileAccess,
         to: FileAccess = from,
-    ): Flow<OpProgress> = transfer(items, destDir, move = true, conflict, from, to, keepTime = true)
+        resolver: ConflictResolver? = null,
+        skipIdentical: Boolean = true,
+    ): Flow<OpProgress> = transfer(items, destDir, move = true, conflict, from, to, keepTime = true, resolver = resolver, skipIdentical = skipIdentical)
 
     fun createLinks(
         destDir: String,
@@ -174,6 +198,8 @@ object FileOperations {
         from: FileAccess,
         to: FileAccess,
         keepTime: Boolean,
+        resolver: ConflictResolver? = null,
+        skipIdentical: Boolean = true,
     ): Flow<OpProgress> = flow {
         val dest = to.file(destDir)
         val totalBytes = items.sumOf { FsUtil.sizeOf(from.file(it.path), from) }
@@ -183,6 +209,7 @@ object FileOperations {
         val failed = mutableListOf<String>()
         val skipped = mutableListOf<String>()
         val created = mutableListOf<String>()
+        var appliedAll: Conflict? = null
 
         for (item in items) {
             currentCoroutineContext().ensureActive()
@@ -204,12 +231,28 @@ object FileOperations {
             var target = to.child(dest, src.name)
             var merge = false
             if (FsUtil.exists(target, to)) {
-                when (if (sameDir) Conflict.KEEP_BOTH else conflict) {
+                val srcSize = if (src.isDirectory) -1L else FsUtil.sizeOf(src, from)
+                val dstSize = if (target.isDirectory) -1L else FsUtil.sizeOf(target, to)
+                if (skipIdentical && !src.isDirectory && !target.isDirectory &&
+                    identicalFile(srcSize, src.lastModified(), dstSize, target.lastModified())
+                ) {
+                    skipped += item.name
+                    continue
+                }
+                var policy = if (sameDir) Conflict.KEEP_BOTH else (appliedAll ?: conflict)
+                if (policy == Conflict.ASK) {
+                    val decision = resolver?.resolve(
+                        ConflictInfo(item.name, src.isDirectory, srcSize, src.lastModified(), dstSize, target.lastModified()),
+                    ) ?: ConflictDecision(Conflict.KEEP_BOTH)
+                    if (decision.applyToAll) appliedAll = decision.conflict
+                    policy = decision.conflict
+                }
+                when (policy) {
                     Conflict.SKIP -> {
                         skipped += item.name
                         continue
                     }
-                    Conflict.KEEP_BOTH -> target = FsUtil.uniqueSibling(target, src.isDirectory, to)
+                    Conflict.KEEP_BOTH, Conflict.ASK -> target = FsUtil.uniqueSibling(target, src.isDirectory, to)
                     Conflict.OVERWRITE -> {
                         if (src.isDirectory && target.isDirectory && !to.isSymlink(target)) {
                             merge = true

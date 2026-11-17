@@ -121,6 +121,7 @@ data class ExplorerUiState(
     val renameHistory: List<RenameRule> = emptyList(),
     val passwordPrompt: PasswordPrompt? = null,
     val transferPrompt: TransferPrompt? = null,
+    val fileConflict: dev.cluvex.strata.core.fs.ConflictInfo? = null,
     val storages: List<RemoteConnection> = emptyList(),
     val remoteEdits: List<RemoteEdit> = emptyList(),
     val storagePrompt: StoragePrompt? = null,

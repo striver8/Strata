@@ -234,6 +234,14 @@
     <string name="explorer_conflict_question">What should happen?</string>
     <string name="explorer_conflict_keep_both">Keep both (rename the new one)</string>
     <string name="explorer_conflict_replace">Replace (folders are merged)</string>
+    <string name="explorer_conflict_ask_each">Ask for each file</string>
+    <string name="explorer_conflict_identical_note">Identical files (same size and modification time) are skipped automatically.</string>
+    <string name="file_conflict_title">File already exists</string>
+    <string name="file_conflict_source">Source: %1$s · %2$s</string>
+    <string name="file_conflict_destination">Existing: %1$s · %2$s</string>
+    <string name="file_conflict_apply_all">Apply to all remaining conflicts</string>
+    <string name="file_conflict_keep_both">Keep both</string>
+    <string name="file_conflict_overwrite">Replace</string>
     <string name="explorer_checksums">Checksums</string>
     <string name="explorer_computing">Computing…</string>
     <string name="explorer_checksum_native">Native</string>
